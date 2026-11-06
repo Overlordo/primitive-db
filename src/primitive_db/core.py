@@ -24,7 +24,7 @@ def _schema(metadata, table_name):
 @handle_db_errors
 def create_table(metadata, table_name, columns):
     """Проверить схему, добавить ID и зарегистрировать таблицу."""
-    if table_name in metadata:
+    if any(name.casefold() == table_name.casefold() for name in metadata):
         raise ValueError(f'Таблица "{table_name}" уже существует.')
     if not table_name.isidentifier():
         raise ValueError(f"Некорректное имя таблицы: {table_name}.")
