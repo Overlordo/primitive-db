@@ -1,6 +1,7 @@
-"""Операции со схемами таблиц."""
+"""Управление схемами и строками таблиц."""
 
 from primitive_db.constants import ID_COLUMN, VALID_TYPES
+from primitive_db.utils import load_table_data
 
 
 def _schema(metadata, table_name):
@@ -46,3 +47,67 @@ def drop_table(metadata, table_name):
 def list_tables(metadata):
     """Вернуть имена таблиц в алфавитном порядке."""
     return sorted(metadata)
+
+
+def _validate_value(column, type_name, value):
+    """Проверить точное соответствие значения типу столбца."""
+    if type(value) is not VALID_TYPES[type_name]:
+        raise ValueError(f"Столбец {column} ожидает {type_name}, получено {value!r}.")
+
+
+def validate_fields(schema, fields):
+    """Проверить имена и типы полей из WHERE или SET."""
+    types = dict(column.split(":") for column in schema)
+    for column, value in fields.items():
+        if column not in types:
+            raise KeyError(f'Столбец "{column}" не существует.')
+        _validate_value(column, types[column], value)
+    return True
+
+
+def table_schema(metadata, table_name):
+    """Вернуть список столбцов для вывода или проверки команды."""
+    return _schema(metadata, table_name)
+
+
+def insert(metadata, table_name, values):
+    """Проверить значения и вернуть данные с новой строкой."""
+    columns = _schema(metadata, table_name)[1:]
+    if len(values) != len(columns):
+        raise ValueError(
+            f"Ожидалось значений: {len(columns)}, получено: {len(values)}."
+        )
+
+    table_data = load_table_data(table_name)
+    next_id = max((row[ID_COLUMN] for row in table_data), default=0) + 1
+    row = {ID_COLUMN: next_id}
+    for column, value in zip(columns, values):
+        name, type_name = column.split(":")
+        _validate_value(name, type_name, value)
+        row[name] = value
+    return [*table_data, row]
+
+
+def _matches(row, where_clause):
+    """Проверить, что строка соответствует всем полям условия."""
+    return all(row[column] == value for column, value in where_clause.items())
+
+
+def select(table_data, where_clause=None):
+    """Вернуть копии всех строк или строк, подходящих под условие."""
+    return [row.copy() for row in table_data if _matches(row, where_clause or {})]
+
+
+def update(table_data, set_clause, where_clause):
+    """Заменить указанные поля у подходящих строк."""
+    if ID_COLUMN in set_clause:
+        raise ValueError(f"Столбец {ID_COLUMN} нельзя изменить.")
+    return [
+        {**row, **set_clause} if _matches(row, where_clause) else row
+        for row in table_data
+    ]
+
+
+def delete(table_data, where_clause):
+    """Вернуть строки, не подходящие под условие удаления."""
+    return [row for row in table_data if not _matches(row, where_clause)]
