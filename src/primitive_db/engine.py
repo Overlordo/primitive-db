@@ -12,6 +12,7 @@ from primitive_db.constants import (
     META_FILE,
     TABLE_HELP,
 )
+from primitive_db.decorators import handle_db_errors
 from primitive_db.parser import parse_command
 from primitive_db.utils import (
     load_metadata,
@@ -41,6 +42,8 @@ def _create_table(metadata, table, columns):
 
 def _drop_table(metadata, table):
     """Сохранить метаданные и удалить файл строк после удаления таблицы."""
+    if core.table_schema(metadata, table) is None:
+        return
     updated = core.drop_table(metadata, table)
     if updated is None:
         return
@@ -117,6 +120,7 @@ def _manage_rows(command, metadata, table, *args):
     _save_changes(command, table, rows, updated, where_clause)
 
 
+@handle_db_errors
 def _execute(command, args):
     """Загрузить метаданные и передать команду её обработчику."""
     if command == "help":
@@ -147,19 +151,24 @@ def _execute(command, args):
         print(f"Функции {command} нет. Попробуйте снова.")
 
 
+@handle_db_errors
+def _read_command():
+    """Прочитать и разобрать команду из консоли."""
+    return parse_command(prompt.string(COMMAND_PROMPT))
+
+
 def run():
     """Читать команды до выхода, EOF или прерывания."""
     print_help()
     while True:
         try:
-            command, args = parse_command(prompt.string(COMMAND_PROMPT))
+            parsed = _read_command()
+            if parsed is None:
+                continue
+            command, args = parsed
             if command == "exit":
                 return
             _execute(command, args)
         except (EOFError, KeyboardInterrupt):
             print()
             return
-        except KeyError as error:
-            print(f"Ошибка: {error.args[0]}")
-        except (ValueError, OSError) as error:
-            print(f"Ошибка: {error}")

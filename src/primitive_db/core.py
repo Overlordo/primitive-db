@@ -1,7 +1,17 @@
 """Управление схемами и строками таблиц."""
 
+import json
+
 from primitive_db.constants import ID_COLUMN, VALID_TYPES
+from primitive_db.decorators import (
+    confirm_action,
+    create_cacher,
+    handle_db_errors,
+    log_time,
+)
 from primitive_db.utils import load_table_data
+
+_cache_select = create_cacher()
 
 
 def _schema(metadata, table_name):
@@ -11,6 +21,7 @@ def _schema(metadata, table_name):
     return metadata[table_name]
 
 
+@handle_db_errors
 def create_table(metadata, table_name, columns):
     """Проверить схему, добавить ID и зарегистрировать таблицу."""
     if table_name in metadata:
@@ -37,6 +48,8 @@ def create_table(metadata, table_name, columns):
     return metadata
 
 
+@handle_db_errors
+@confirm_action("удаление таблицы")
 def drop_table(metadata, table_name):
     """Удалить схему существующей таблицы."""
     _schema(metadata, table_name)
@@ -55,6 +68,7 @@ def _validate_value(column, type_name, value):
         raise ValueError(f"Столбец {column} ожидает {type_name}, получено {value!r}.")
 
 
+@handle_db_errors
 def validate_fields(schema, fields):
     """Проверить имена и типы полей из WHERE или SET."""
     types = dict(column.split(":") for column in schema)
@@ -65,11 +79,14 @@ def validate_fields(schema, fields):
     return True
 
 
+@handle_db_errors
 def table_schema(metadata, table_name):
     """Вернуть список столбцов для вывода или проверки команды."""
     return _schema(metadata, table_name)
 
 
+@handle_db_errors
+@log_time
 def insert(metadata, table_name, values):
     """Проверить значения и вернуть данные с новой строкой."""
     columns = _schema(metadata, table_name)[1:]
@@ -93,11 +110,21 @@ def _matches(row, where_clause):
     return all(row[column] == value for column, value in where_clause.items())
 
 
+@handle_db_errors
+@log_time
 def select(table_data, where_clause=None):
-    """Вернуть копии всех строк или строк, подходящих под условие."""
-    return [row.copy() for row in table_data if _matches(row, where_clause or {})]
+    """Вернуть копии подходящих строк, переиспользуя результат запроса."""
+    condition = where_clause or {}
+    key = json.dumps((table_data, condition), sort_keys=True)
+
+    def matching_rows():
+        """Вычислить результат для текущего содержимого таблицы."""
+        return [row.copy() for row in table_data if _matches(row, condition)]
+
+    return [row.copy() for row in _cache_select(key, matching_rows)]
 
 
+@handle_db_errors
 def update(table_data, set_clause, where_clause):
     """Заменить указанные поля у подходящих строк."""
     if ID_COLUMN in set_clause:
@@ -108,6 +135,8 @@ def update(table_data, set_clause, where_clause):
     ]
 
 
+@handle_db_errors
+@confirm_action("удаление записей")
 def delete(table_data, where_clause):
     """Вернуть строки, не подходящие под условие удаления."""
     return [row for row in table_data if not _matches(row, where_clause)]
